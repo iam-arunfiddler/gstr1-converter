@@ -4,6 +4,7 @@ GSTR1 Converter is a command-line Python tool that converts invoice data from a 
 
 Prerequisites : 
 * Download the MTR of Filing month (Supports only B2C)
+* Download the Python folder above and copy your MTR report inside the folder and rename to input.csv
 ---------------------------
 
 🚀 Features
