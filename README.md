@@ -1,4 +1,4 @@
-###GSTR1 Converter for Amazon Sellers. 
+### GSTR1 Converter for Amazon Sellers. 
 
 GSTR1 Converter is a command-line Python tool that converts invoice data from a CSV file into a GST-compliant JSON file, ready for upload to the GST Portal. It is specifically designed for sellers filing GSTR-1 returns in India.
 
