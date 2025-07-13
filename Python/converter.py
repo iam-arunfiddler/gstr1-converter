@@ -24,7 +24,7 @@ def get_pos_code(state_name):
         "TAMIL NADU": "33", "PUDUCHERRY": "34", "ANDAMAN & NICOBAR ISLANDS": "35",
         "TELANGANA": "36", "ANDHRA PRADESH": "37", "LADAKH": "38", "OTHER TERRITORY": "97"
     }
-    return pos_mapping.get(state_name.upper(), "97")  # Default to "97" if not found
+    return pos_mapping.get(state_name.upper(), "97")
 
 def csv_to_json(csv_file_path, fp):
     data = {
@@ -37,47 +37,71 @@ def csv_to_json(csv_file_path, fp):
             "clttx": []
         }
     }
-
+    
     b2cs_data = defaultdict(lambda: defaultdict(Decimal))
     supeco_data = defaultdict(lambda: defaultdict(Decimal))
-
+    
     with open(csv_file_path, 'r') as csv_file:
         csv_reader = csv.DictReader(csv_file)
         for row in csv_reader:
             # Extract GSTIN
             data["gstin"] = row["Seller Gstin"]
-
+            
+            # Skip rows with zero or empty taxable value
+            txval = Decimal(row["Tax Exclusive Gross"] or "0")
+            if txval <= 0:
+                continue
+            
             # Process B2CS data
             pos = get_pos_code(row["Ship To State"])
             sply_ty = "INTRA" if pos == "33" else "INTER"
-            rt = int(Decimal(row["Igst Rate"]) * 100) if sply_ty == "INTER" else int(Decimal(row["Cgst Rate"]) * 200)
-
-            key = (sply_ty, rt, "OE", pos)
-            txval = Decimal(row["Tax Exclusive Gross"])
-            b2cs_data[key]["txval"] += txval
-           
-
+            
+            # Calculate tax rate and skip if 0%
             if sply_ty == "INTER":
-                iamt = Decimal(row["Igst Tax"]) + Decimal(row["Shipping Igst Tax"])
+                igst_rate = Decimal(row["Igst Rate"] or "0")
+                if igst_rate <= 0:
+                    continue
+                rt = int(igst_rate * 100)
+            else:
+                cgst_rate = Decimal(row["Cgst Rate"] or "0")
+                if cgst_rate <= 0:
+                    continue
+                rt = int(cgst_rate * 200)  # CGST + SGST = Total rate
+            
+            key = (sply_ty, rt, "OE", pos)
+            b2cs_data[key]["txval"] += txval
+            
+            if sply_ty == "INTER":
+                iamt = Decimal(row["Igst Tax"] or "0") + Decimal(row["Shipping Igst Tax"] or "0")
                 b2cs_data[key]["iamt"] += iamt
             else:
-                camt = Decimal(row["Cgst Tax"]) + Decimal(row["Shipping Cgst Tax"])
-                samt = Decimal(row["Sgst Tax"]) + Decimal(row["Shipping Sgst Tax"])
+                camt = Decimal(row["Cgst Tax"] or "0") + Decimal(row["Shipping Cgst Tax"] or "0")
+                samt = Decimal(row["Sgst Tax"] or "0") + Decimal(row["Shipping Sgst Tax"] or "0")
                 b2cs_data[key]["camt"] += camt
                 b2cs_data[key]["samt"] += samt
-            b2cs_data[key]["csamt"] += Decimal(row.get("Compensatory Cess Tax", "0"))
-            # Process SUPECO data
+            
+            b2cs_data[key]["csamt"] += Decimal(row.get("Compensatory Cess Tax", "0") or "0")
+            
+            # Process SUPECO data only if there's actual tax
             etin = "33AAICA3918J1C0"  # Static ETIN
-            supeco_data[etin]["suppval"] += Decimal(row["Invoice Amount"])
-            if sply_ty == "INTER":
-                supeco_data[etin]["igst"] += iamt
-            else:
-                supeco_data[etin]["cgst"] += camt
-                supeco_data[etin]["sgst"] += samt
-            supeco_data[etin]["cess"] += Decimal(row.get("Compensatory Cess Tax", "0"))
-
-    # Populate B2CS data
+            invoice_amount = Decimal(row["Invoice Amount"] or "0")
+            
+            if invoice_amount > 0:
+                supeco_data[etin]["suppval"] += invoice_amount
+                
+                if sply_ty == "INTER":
+                    supeco_data[etin]["igst"] += iamt
+                else:
+                    supeco_data[etin]["cgst"] += camt
+                    supeco_data[etin]["sgst"] += samt
+                
+                supeco_data[etin]["cess"] += Decimal(row.get("Compensatory Cess Tax", "0") or "0")
+    
+    # Populate B2CS data - only include entries with meaningful values
     for key, value in b2cs_data.items():
+        if value["txval"] <= 0:  # Skip entries with no taxable value
+            continue
+            
         entry = {
             "sply_ty": key[0],
             "rt": key[1],
@@ -86,15 +110,20 @@ def csv_to_json(csv_file_path, fp):
             "txval": round(value["txval"], 2),
             "csamt": format_decimal(value["csamt"])
         }
+        
         if key[0] == "INTER":
             entry["iamt"] = format_decimal(value["iamt"])
         else:
             entry["camt"] = format_decimal(value["camt"])
             entry["samt"] = format_decimal(value["samt"])
+        
         data["b2cs"].append(entry)
-
-    # Populate SUPECO data
+    
+    # Populate SUPECO data - only include entries with meaningful values
     for etin, value in supeco_data.items():
+        if value["suppval"] <= 0:  # Skip entries with no supply value
+            continue
+            
         entry = {
             "etin": etin,
             "suppval": round(value["suppval"], 2),
@@ -105,27 +134,33 @@ def csv_to_json(csv_file_path, fp):
             "flag": "N"
         }
         data["supeco"]["clttx"].append(entry)
-
+    
     return data
 
 # Get filing period from user
-gsttin = input("Enter your GSTIN: ")
+gstin = input("Enter your GSTIN: ")
 fp = input("Enter the filing period (MMYYYY): ")
 
 # Input and output file paths
 input_file = "input.csv"
-output_file = f"GSTR1_returns_{gsttin}_monthly_{fp}.json"
+output_file = f"GSTR1_returns_{gstin}_monthly_{fp}.json"
 
-# Convert CSV to JSON
-json_data = csv_to_json(input_file, fp)
-
-# Write JSON to file
-with open(output_file, "w") as json_file:
-    json.dump(json_data, json_file, indent=2, default=decimal_default)
-
-print(f"Conversion complete. JSON file saved as {output_file}")
-
-# Display the contents of the output JSON file
-print("\nContents of output JSON file:")
-with open(output_file, 'r') as f:
-    print(f.read())
+try:
+    # Convert CSV to JSON
+    json_data = csv_to_json(input_file, fp)
+    
+    # Write JSON to file
+    with open(output_file, "w") as json_file:
+        json.dump(json_data, json_file, indent=2, default=decimal_default)
+    
+    print(f"Conversion complete. JSON file saved as {output_file}")
+    
+    # Display the contents of the output JSON file
+    print("\nContents of output JSON file:")
+    with open(output_file, 'r') as f:
+        print(f.read())
+        
+except FileNotFoundError:
+    print(f"Error: Could not find the input file '{input_file}'. Please make sure it exists in the same directory.")
+except Exception as e:
+    print(f"Error during conversion: {str(e)}")
