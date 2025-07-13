@@ -47,8 +47,8 @@ Example row:
 python gstr1_converter.py
 ```
 3. Enter:
-    *GSTIN (e.g., 33ABCDE1234F1Z5)
-    *Filing period (e.g., 072024 for July 2024)
+    * GSTIN (e.g., 33ABCDE1234F1Z5)
+    * Filing period (e.g., 072024 for July 2024)
 4. Output file will be generated as:
 ```bash
   GSTR1_returns_<GSTIN>_monthly_<MMYYYY>.json
